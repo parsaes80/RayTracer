@@ -4,6 +4,7 @@ import "core:fmt"
 import sdl "vendor:sdl3"
 import la "core:math/linalg"
 import math "core:math"
+import rand "core:math/rand"
 
 Interval::struct{
     min:f64,
@@ -120,6 +121,7 @@ Camera::struct{
     pixel_delta_u:Vec3,   // Offset to pixel to the right
     pixel_delta_v:Vec3,   // Offset to pixel below
     pixel00_loc:Point,   // Location of pixel 0, 0
+    samples_per_pixel:i64
 }
 
 create_camera::proc()->Camera{
@@ -138,18 +140,33 @@ create_camera::proc()->Camera{
     viewport_upper_left := camera_center - Point{0, 0, focal_length} - viewport_u/2 - viewport_v/2;
     pixel00_loc := viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v);
 
-    return Camera{ASPECT_RATIO,HEIGHT,WIDTH,camera_center,pixel_delta_u,pixel_delta_v,pixel00_loc}
+    return Camera{ASPECT_RATIO,HEIGHT,WIDTH,camera_center,pixel_delta_u,pixel_delta_v,pixel00_loc,10}
+}
+
+get_ray::proc(i:i64,j:i64,camera:Camera)->Ray{
+    offset:= Vec3{rand.float64()-0.5,rand.float64()-0.5,0} 
+
+    pixel_sample := camera.pixel00_loc +
+    ((f64(i)+offset.x)*camera.pixel_delta_u) +
+    (((f64(j)+offset.y)*camera.pixel_delta_v))
+
+    ray_origin := camera.center
+    ray_direction := pixel_sample - ray_origin
+
+    return Ray{ray_origin, ray_direction}  
 }
 
 render::proc(camera:^Camera,objects:[dynamic]Sphere){
-    for j := 0; j < HEIGHT; j+=1 {
-        for i := 0; i < WIDTH; i+=1 {
-            pixel_center := camera.pixel00_loc + (f64(i) * camera.pixel_delta_u) + (f64(j) * camera.pixel_delta_v);
-            ray_direction := pixel_center - camera.center;
-            r:= Ray{camera.center, ray_direction};
+    for j :i64= 0; j < HEIGHT; j+=1 {
+        for i :i64= 0; i < WIDTH; i+=1 {
 
-            pixel_color := ray_color(r,objects);
-            Framebuffer[j][i] = write_color(pixel_color)
+            pixel_color := Color{0,0,0}
+            for sample:i64=0;sample<camera.samples_per_pixel;sample+= 1{
+                r := get_ray(i,j,camera^)
+                pixel_color += ray_color(r,objects)
+            }
+
+            Framebuffer[j][i] = write_color(pixel_color/f64(camera.samples_per_pixel))
         }
     }
 }

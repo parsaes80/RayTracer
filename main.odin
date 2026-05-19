@@ -10,7 +10,7 @@ Point:: [3]f64
 Color :: [3]f64
 
 ASPECT_RATIO :f64: 16.0/9.0
-HEIGHT:: 1080
+HEIGHT:: 720
 WIDTH:: HEIGHT* 16/9
 
 Framebuffer : [HEIGHT][WIDTH] u32 
