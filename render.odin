@@ -48,6 +48,26 @@ HitRecord :: struct{
     t:f64,
     front_face: bool
 }
+random_vector::proc()->Vec3{
+    return Vec3{rand.float64(),rand.float64(),rand.float64()}
+}
+random_vector2::proc(min:f64,max:f64)->Vec3{
+    return Vec3{rand.float64_range(min,max),rand.float64_range(min,max),rand.float64_range(min,max)}
+}
+
+random_unit_vector::proc()->Vec3{
+    for{
+        p:= random_vector2(-1,1)
+        lensq := la.dot(p,p)
+        if 1e-160 < lensq && lensq <= 1 do return p/math.sqrt(lensq)
+    }
+}
+
+random_on_hemisphere::proc(normal:Vec3)->Vec3{
+    rand_vec := random_unit_vector()
+    if la.dot(rand_vec,normal) > 0.0 do return rand_vec
+    else do return -rand_vec
+}
 
 set_face_normal:: proc(r:Ray,outward_normal:Vec3)->(bool,Vec3){
     front_face := la.dot(r.dir,outward_normal) < 0
@@ -95,10 +115,11 @@ hit_sphere::proc(sphere:Sphere,r:Ray,ray_t:Interval,rec:^HitRecord)->bool{
     return true
 }
 
-ray_color::proc(r:Ray,objects:[dynamic]Sphere)->Color{
+ray_color::proc(r:Ray,max_depth:int,objects:[dynamic]Sphere)->Color{
     rec:HitRecord
-    if hit_all(r, Interval{0,math.INF_F64}, &rec,objects) {
-        return 0.5 * (rec.normal + Color{1,1,1})
+    if hit_all(r, Interval{0.1,math.INF_F64}, &rec,objects) {
+        direction := random_on_hemisphere(rec.normal)
+        return 0.5 * ray_color(Ray{rec.p,direction},max_depth,objects)
     }
     unit_direction := la.normalize(r.dir)
     a := 0.5*(unit_direction.y + 1.0)
@@ -121,7 +142,8 @@ Camera::struct{
     pixel_delta_u:Vec3,   // Offset to pixel to the right
     pixel_delta_v:Vec3,   // Offset to pixel below
     pixel00_loc:Point,   // Location of pixel 0, 0
-    samples_per_pixel:i64
+    samples_per_pixel:i64,
+    max_depth:int
 }
 
 create_camera::proc()->Camera{
@@ -140,7 +162,7 @@ create_camera::proc()->Camera{
     viewport_upper_left := camera_center - Point{0, 0, focal_length} - viewport_u/2 - viewport_v/2;
     pixel00_loc := viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v);
 
-    return Camera{ASPECT_RATIO,HEIGHT,WIDTH,camera_center,pixel_delta_u,pixel_delta_v,pixel00_loc,10}
+    return Camera{ASPECT_RATIO,HEIGHT,WIDTH,camera_center,pixel_delta_u,pixel_delta_v,pixel00_loc,10,10}
 }
 
 get_ray::proc(i:i64,j:i64,camera:Camera)->Ray{
@@ -159,13 +181,11 @@ get_ray::proc(i:i64,j:i64,camera:Camera)->Ray{
 render::proc(camera:^Camera,objects:[dynamic]Sphere){
     for j :i64= 0; j < HEIGHT; j+=1 {
         for i :i64= 0; i < WIDTH; i+=1 {
-
             pixel_color := Color{0,0,0}
             for sample:i64=0;sample<camera.samples_per_pixel;sample+= 1{
                 r := get_ray(i,j,camera^)
-                pixel_color += ray_color(r,objects)
+                pixel_color += ray_color(r,camera.max_depth,objects)
             }
-
             Framebuffer[j][i] = write_color(pixel_color/f64(camera.samples_per_pixel))
         }
     }
