@@ -1,4 +1,4 @@
-package raytacer
+package main
 
 import "core:fmt"
 import sdl "vendor:sdl3"
@@ -31,9 +31,18 @@ main :: proc(){
     camera := create_camera()
 
     objects:[dynamic]Sphere
-    append(&objects,Sphere{Point{0,0,-1},0.5},Sphere{Point{0,-100.5,-1},100})
+    material_ground := Material{Color{0.8, 0.8, 0.0},.Lambert}
+    material_center := Material{Color{0.1, 0.2, 0.5},.Lambert}
+    material_left   := Material{Color{0.8, 0.8, 0.8},.Metal}
+    material_right  := Material{Color{0.8, 0.6, 0.2},.Metal}
+    append(&objects,
+        Sphere{Point{0.0, -100.5, -1.0},100.0,material_ground},
+        Sphere{Point{0.0,    0.0, -1.2},0.5,material_center},
+        Sphere{Point{-1.0,    0.0, -1.0},0.5,material_left},
+        Sphere{Point{1.0,    0.0, -1.0},0.5,material_right},
+    )
 
-    render(&camera,objects)
+    render(camera,objects)
 
     event: sdl.Event
     for running {
