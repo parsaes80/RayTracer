@@ -51,11 +51,25 @@ HitRecord :: struct{
     mat:Material
 }
 
-MaterialType::enum{Lambert,Metal}
+MaterialType::enum{Lambert,Metal,Dielectric}
 
-Material::struct{
-    albedo:Color,
-    mat_type:MaterialType
+Lambert :: struct {
+  albedo: Color
+}
+
+Metallic :: struct {
+  color: Color,
+  fuzz: f64
+}
+
+Dielectric :: struct {
+    refraction_index: f64
+}
+
+Material :: union {
+    Lambert,
+    Metallic,
+    Dielectric
 }
 
 Camera::struct{
@@ -63,6 +77,7 @@ Camera::struct{
     image_height:i64, 
     image_width:i64,
     center:Point,        // Camera center
+    vfov:f64,
     pixel_delta_u:Vec3,   // Offset to pixel to the right
     pixel_delta_v:Vec3,   // Offset to pixel below
     pixel00_loc:Point,   // Location of pixel 0, 0
@@ -71,14 +86,25 @@ Camera::struct{
 }
 
 create_camera::proc()->Camera{
-    viewport_height := 2.0
-    viewport_width := viewport_height * ASPECT_RATIO
+    //Given values
+    samples_per_pixel : i64 = 10
+    max_depth := 10
     focal_length := 1.0
+    vfov := 90.0
+
+    // Determine viewport dimensions.
+    theta := la.RAD_PER_DEG * vfov
+    h:= math.tan(theta/2)
+    viewport_height := 2 * h * focal_length
+    viewport_width := viewport_height * ASPECT_RATIO
 
     camera_center := Point{0,0,0}
 
+    // Calculate the vectors across the horizontal and down the vertical viewport edges.
     viewport_u := Point{viewport_width, 0, 0}
     viewport_v := Point{0, -viewport_height, 0}
+
+    // Calculate the horizontal and vertical delta vectors from pixel to pixel.
     pixel_delta_u := viewport_u / WIDTH
     pixel_delta_v := viewport_v / HEIGHT
 
@@ -86,7 +112,16 @@ create_camera::proc()->Camera{
     viewport_upper_left := camera_center - Point{0, 0, focal_length} - viewport_u/2 - viewport_v/2;
     pixel00_loc := viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v);
 
-    return Camera{ASPECT_RATIO,HEIGHT,WIDTH,camera_center,pixel_delta_u,pixel_delta_v,pixel00_loc,10,10}
+    return Camera{
+        ASPECT_RATIO,
+        HEIGHT,WIDTH,
+        camera_center,
+        vfov,
+        pixel_delta_u,
+        pixel_delta_v,
+        pixel00_loc,
+        samples_per_pixel,
+        max_depth}
 }
 
 random_vector1::proc()->Vec3{
@@ -101,7 +136,7 @@ random_vector::proc{random_vector1,random_vector2}
 random_unit_vector::proc()->Vec3{
     for{
         p:= random_vector(-1,1)
-        lensq := la.dot(p,p)
+        lensq := la.length2(p)
         if 1e-160 < lensq && lensq <= 1 do return p/math.sqrt(lensq)
     }
 }
@@ -111,37 +146,66 @@ random_on_hemisphere::proc(normal:Vec3)->Vec3{
     if la.dot(rand_vec,normal) > 0.0 do return rand_vec
     else do return -rand_vec
 }
+
 linear_to_gamma::proc(linear_component:f64)->f64{
     if linear_component > 0 do return math.sqrt(linear_component)
     return 0
 }
+
 set_face_normal:: proc(r:Ray,outward_normal:Vec3)->(bool,Vec3){
     front_face := la.dot(r.dir,outward_normal) < 0
     normal := front_face ? outward_normal : -outward_normal
     return front_face,normal
 }
-reflect::proc(v:Vec3, n:Vec3)->Vec3 {
-    return v - 2*la.dot(v,n)*n;
-}
+
 ray_at::proc(ray:Ray,t:f64)-> Vec3{
     return ray.orig+t*ray.dir
 }
 
+reflect::proc(v:Vec3, n:Vec3)->Vec3 {
+    return v - 2*la.dot(v,n)*n;
+}
+
+refract::proc(uv:Vec3,n:Vec3,nue_ratio:f64)->Vec3{
+    cos_theta := math.min(la.dot(-uv,n),1.0)
+    rout_perp := nue_ratio * (uv + cos_theta*n)
+    rout_par  := -math.sqrt(math.abs(1.0 - la.length2(rout_perp))) * n
+    return rout_par+rout_perp
+}
+
 scatter::proc(r:Ray, rec:^HitRecord,attenuation:^Color,scattered:^Ray,mat:Material)->bool{
-    if mat.mat_type == .Lambert
-    {   
+    switch m in mat {
+    case Lambert:
         scatter_direction := rec.normal + random_unit_vector()
-        if la.dot(scatter_direction,scatter_direction) <= 1e-24 do scatter_direction=rec.normal
+        if la.length2(scatter_direction) <= 1e-24 do scatter_direction=rec.normal
         scattered^ = Ray{rec.p,scatter_direction}
-        attenuation^ = mat.albedo
+        attenuation^ = m.albedo
         return true
-    }
-    else if mat.mat_type == .Metal
-    {
+    case Metallic:
         reflected := reflect(la.normalize(r.dir), rec.normal)
+        reflected = la.normalize(reflected) + (m.fuzz * random_unit_vector())
         scattered^ = Ray{rec.p, reflected}
-        attenuation^ = mat.albedo
+        attenuation^ = m.color
         return la.dot(scattered.dir, rec.normal) > 0
+    case Dielectric:
+        attenuation^ = Color{1.0, 1.0, 1.0}
+        ri := rec.front_face ? (1.0/m.refraction_index) : m.refraction_index
+        unit_direction := la.normalize(r.dir)
+        cos_theta := math.min(la.dot(-unit_direction, rec.normal), 1.0);
+        sin_theta := math.sqrt(1.0 - cos_theta*cos_theta);
+
+        cannot_refract := ri * sin_theta > 1.0;
+        direction:Vec3
+
+        r0 := (1 - ri) / (1 + ri)
+        r0 = r0*r0
+        reflectance := r0 + (1-r0)* math.pow_f64((1 - cos_theta),5)
+
+        if cannot_refract || reflectance>rand.float64() do direction = reflect(unit_direction, rec.normal);
+        else do direction = refract(unit_direction, rec.normal, ri);
+
+        scattered^ = Ray{rec.p, direction}
+        return true
     }
     return false
 }
@@ -163,9 +227,9 @@ hit_all:: proc(r:Ray, ray_t:Interval,rec:^HitRecord,objects:[dynamic]Sphere)->bo
 
 hit_sphere::proc(sphere:Sphere,r:Ray,ray_t:Interval,rec:^HitRecord)->bool{
     oc := sphere.center - r.orig
-    a := la.dot(r.dir,r.dir)
+    a := la.length2(r.dir)
     h := la.dot(r.dir,oc) 
-    c := la.dot(oc,oc) -sphere.radius*sphere.radius
+    c := la.length2(oc) -sphere.radius*sphere.radius
     discriminant := h*h - a*c
     if discriminant < 0 do return false
     sqrtd := math.sqrt(discriminant)
@@ -191,6 +255,7 @@ ray_color::proc(r:Ray,depth:int,objects:[dynamic]Sphere)->Color{
         if scatter(r,&rec,&attenuation,&scattered,rec.mat){
             return attenuation*ray_color(scattered,depth-1,objects)
         }
+        else do return Color{0,0,0}
     }
     unit_direction := la.normalize(r.dir)
     a := 0.5*(unit_direction.y + 1.0)

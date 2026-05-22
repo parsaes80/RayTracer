@@ -31,15 +31,18 @@ main :: proc(){
     camera := create_camera()
 
     objects:[dynamic]Sphere
-    material_ground := Material{Color{0.8, 0.8, 0.0},.Lambert}
-    material_center := Material{Color{0.1, 0.2, 0.5},.Lambert}
-    material_left   := Material{Color{0.8, 0.8, 0.8},.Metal}
-    material_right  := Material{Color{0.8, 0.6, 0.2},.Metal}
+    material_ground : Material = Lambert{Color{0.8, 0.8, 0.0}}
+    material_center : Material = Lambert{Color{0.1, 0.2, 0.5}}
+    material_left   : Material = Dielectric{1.5}
+    material_bubble : Material = Dielectric{1.00 / 1.50}
+    material_right  : Material = Metallic{Color{0.8, 0.6, 0.2},0.9}
+
     append(&objects,
         Sphere{Point{0.0, -100.5, -1.0},100.0,material_ground},
-        Sphere{Point{0.0,    0.0, -1.2},0.5,material_center},
-        Sphere{Point{-1.0,    0.0, -1.0},0.5,material_left},
-        Sphere{Point{1.0,    0.0, -1.0},0.5,material_right},
+        Sphere{Point{0.0,  0.0,   -1.2},0.5  ,material_center},
+        Sphere{Point{-1.0, 0.0,   -1.0},0.5  ,material_left},
+        Sphere{Point{-1.0, 0.0,   -1.0},0.4  ,material_bubble},
+        Sphere{Point{1.0,  0.0,   -1.0},0.5  ,material_right},
     )
 
     render(camera,objects)
