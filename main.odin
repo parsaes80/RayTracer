@@ -4,6 +4,7 @@ import "core:fmt"
 import sdl "vendor:sdl3"
 import la "core:math/linalg"
 import math "core:math"
+import rand "core:math/rand"
 
 Vec3:: [3]f64
 Point:: [3]f64
@@ -31,21 +32,40 @@ main :: proc(){
     camera := create_camera()
 
     objects:[dynamic]Sphere
-    material_ground : Material = Lambert{Color{0.8, 0.8, 0.0}}
-    material_center : Material = Lambert{Color{0.1, 0.2, 0.5}}
-    material_left   : Material = Dielectric{1.5}
-    material_bubble : Material = Dielectric{1.00 / 1.50}
-    material_right  : Material = Metallic{Color{0.8, 0.6, 0.2},0.9}
 
+    ground_material : Material = Lambert{Color{0.5, 0.5, 0.5}}
+    append(&objects, Sphere{Point{0.0, -1000.0, 0.0}, 1000.0, ground_material})
+
+    for a := -11; a < 11; a += 1 {
+        for b := -11; b < 11; b += 1 {
+            choose_mat := rand.float64()
+            center := Point{f64(a) + 0.9*rand.float64(), 0.2, f64(b) + 0.9*rand.float64()}
+
+            if la.length(center - Point{4.0, 0.2, 0.0}) > 0.9 {
+                if choose_mat < 0.8 {
+                    albedo := random_vector(0.0, 1.0) * random_vector(0.0, 1.0)
+                    append(&objects, Sphere{center, 0.2, Lambert{albedo}})
+                } else if choose_mat < 0.95 {
+                    albedo := random_vector(0.5, 1.0)
+                    fuzz := rand.float64_range(0.0, 0.5)
+                    append(&objects, Sphere{center, 0.2, Metallic{albedo, fuzz}})
+                } else {
+                    append(&objects, Sphere{center, 0.2, Dielectric{1.5}})
+                }
+            }
+        }
+    }
+
+    material1 : Material = Dielectric{1.5}
+    material2 : Material = Lambert{Color{0.4, 0.2, 0.1}}
+    material3 : Material = Metallic{Color{0.7, 0.6, 0.5}, 0.0}
     append(&objects,
-        Sphere{Point{0.0, -100.5, -1.0},100.0,material_ground},
-        Sphere{Point{0.0,  0.0,   -1.2},0.5  ,material_center},
-        Sphere{Point{-1.0, 0.0,   -1.0},0.5  ,material_left},
-        Sphere{Point{-1.0, 0.0,   -1.0},0.4  ,material_bubble},
-        Sphere{Point{1.0,  0.0,   -1.0},0.5  ,material_right},
+        Sphere{Point{0.0, 1.0, 0.0}, 1.0, material1},
+        Sphere{Point{-4.0, 1.0, 0.0}, 1.0, material2},
+        Sphere{Point{4.0, 1.0, 0.0}, 1.0, material3},
     )
 
-    render(camera,objects)
+    render_parallel(camera,objects)
 
     event: sdl.Event
     for running {

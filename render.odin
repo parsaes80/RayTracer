@@ -5,6 +5,9 @@ import sdl "vendor:sdl3"
 import la "core:math/linalg"
 import math "core:math"
 import rand "core:math/rand"
+import "core:sync"
+import "core:thread"
+import runtime "base:runtime"
 
 Interval::struct{
     min:f64,
@@ -76,7 +79,9 @@ Camera::struct{
     aspect_ratio:f64,
     image_height:i64, 
     image_width:i64,
-    center:Point,        // Camera center
+    look_from:Point,
+    look_at:Point,
+    vup:Vec3,        
     vfov:f64,
     pixel_delta_u:Vec3,   // Offset to pixel to the right
     pixel_delta_v:Vec3,   // Offset to pixel below
@@ -89,33 +94,43 @@ create_camera::proc()->Camera{
     //Given values
     samples_per_pixel : i64 = 10
     max_depth := 10
-    focal_length := 1.0
-    vfov := 90.0
+    vfov := 30.0
 
-    // Determine viewport dimensions.
+    look_from := Point{13,2,3}
+    look_at := Point{0,0,0}
+    vup := Vec3{0,1,0}
+
+    center := look_from
+
+    focal_length := la.length(look_from - look_at)
+
     theta := la.RAD_PER_DEG * vfov
     h:= math.tan(theta/2)
+
     viewport_height := 2 * h * focal_length
     viewport_width := viewport_height * ASPECT_RATIO
 
-    camera_center := Point{0,0,0}
+    w := la.normalize(look_from - look_at);
+    u := la.normalize(la.cross(vup, w));
+    v := la.cross(w, u);
 
-    // Calculate the vectors across the horizontal and down the vertical viewport edges.
-    viewport_u := Point{viewport_width, 0, 0}
-    viewport_v := Point{0, -viewport_height, 0}
+    viewport_u := viewport_width * u
+    viewport_v := viewport_height * -v
 
     // Calculate the horizontal and vertical delta vectors from pixel to pixel.
     pixel_delta_u := viewport_u / WIDTH
     pixel_delta_v := viewport_v / HEIGHT
 
     // Calculate the location of the upper left pixel.
-    viewport_upper_left := camera_center - Point{0, 0, focal_length} - viewport_u/2 - viewport_v/2;
-    pixel00_loc := viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v);
+    viewport_upper_left := center - (focal_length * w) - viewport_u/2 - viewport_v/2
+    pixel00_loc := viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v)
 
     return Camera{
         ASPECT_RATIO,
         HEIGHT,WIDTH,
-        camera_center,
+        look_from,
+        look_at,
+        vup,
         vfov,
         pixel_delta_u,
         pixel_delta_v,
@@ -146,7 +161,12 @@ random_on_hemisphere::proc(normal:Vec3)->Vec3{
     if la.dot(rand_vec,normal) > 0.0 do return rand_vec
     else do return -rand_vec
 }
-
+random_in_unit_disk::proc()->Vec3{
+    for{
+        p := Vec3{rand.float64_range(-1,1), rand.float64_range(-1,1), 0}
+        if la.length(p) < 1 do return p;
+    }
+}
 linear_to_gamma::proc(linear_component:f64)->f64{
     if linear_component > 0 do return math.sqrt(linear_component)
     return 0
@@ -269,7 +289,7 @@ get_ray::proc(i:i64,j:i64,camera:Camera)->Ray{
     ((f64(i)+offset.x)*camera.pixel_delta_u) +
     (((f64(j)+offset.y)*camera.pixel_delta_v))
 
-    ray_origin := camera.center
+    ray_origin := camera.look_from
     ray_direction := pixel_sample - ray_origin
 
     return Ray{ray_origin, ray_direction}  
@@ -286,9 +306,10 @@ write_color ::proc (pixel_color:Color) -> u32{
     return (ir << 24) | (ig << 16) | (ib << 8) | 0xFF
 }
 
-render::proc(camera:Camera,objects:[dynamic]Sphere){
+render::proc(start:i64,end:i64,camera:Camera,objects:[dynamic]Sphere){
+
     for j :i64= 0; j < HEIGHT; j+=1 {
-        for i :i64= 0; i < WIDTH; i+=1 {
+        for i :i64= start; i < end; i+=1 {
             pixel_color := Color{0,0,0}
             for sample:i64=0;sample<camera.samples_per_pixel;sample+= 1{
                 r := get_ray(i,j,camera)
@@ -296,5 +317,57 @@ render::proc(camera:Camera,objects:[dynamic]Sphere){
             }
             Framebuffer[j][i] = write_color(pixel_color/f64(camera.samples_per_pixel))
         }
+    }
+}
+
+
+RenderJob :: struct {
+    start: i64,
+    end: i64,
+    camera: Camera,
+    objects: [dynamic]Sphere,
+    seed: u64,
+}
+
+render_worker :: proc(data: rawptr) {
+    job := (^RenderJob)(data)
+
+    rng_state: rand.PCG_Random_State
+    context.random_generator = rand.pcg_random_generator(&rng_state)
+    rand.reset_u64(job^.seed)
+
+    render(job^.start, job^.end, job^.camera, job^.objects)
+}
+
+render_parallel::proc(camera:Camera,objects:[dynamic]Sphere){
+
+    thread_count := 16
+
+    rows_per_thread := int(WIDTH) / thread_count
+    remainder := int(WIDTH) % thread_count
+    threads: [dynamic]^thread.Thread
+    jobs: [16]RenderJob
+
+    y := 0
+    for i := 0; i < thread_count; i += 1 {
+        extra := 0
+        if i < remainder do extra = 1
+        start := y
+        end := y + rows_per_thread + extra
+        y = end
+
+        jobs[i] = RenderJob{
+            start = i64(start),
+            end = i64(end),
+            camera = camera,
+            objects = objects,
+            seed = u64(runtime.read_cycle_counter()) + u64(i) * 7919,
+        }
+        t := thread.create_and_start_with_data(&jobs[i], render_worker)
+        append(&threads, t)
+    }
+
+    for t in threads {
+        thread.destroy(t)
     }
 }
