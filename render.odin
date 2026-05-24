@@ -83,6 +83,10 @@ Camera::struct{
     look_at:Point,
     vup:Vec3,        
     vfov:f64,
+    defocus_angle:f64,
+    focus_dist:f64,
+    defocus_disk_u:Vec3,
+    defocus_disk_v:Vec3,
     pixel_delta_u:Vec3,   // Offset to pixel to the right
     pixel_delta_v:Vec3,   // Offset to pixel below
     pixel00_loc:Point,   // Location of pixel 0, 0
@@ -92,9 +96,12 @@ Camera::struct{
 
 create_camera::proc()->Camera{
     //Given values
-    samples_per_pixel : i64 = 10
+    samples_per_pixel : i64 = 100
     max_depth := 10
     vfov := 30.0
+
+    defocus_angle := 0.6;
+    focus_dist    := 10.0;
 
     look_from := Point{13,2,3}
     look_at := Point{0,0,0}
@@ -102,12 +109,10 @@ create_camera::proc()->Camera{
 
     center := look_from
 
-    focal_length := la.length(look_from - look_at)
-
     theta := la.RAD_PER_DEG * vfov
     h:= math.tan(theta/2)
 
-    viewport_height := 2 * h * focal_length
+    viewport_height := 2 * h * focus_dist
     viewport_width := viewport_height * ASPECT_RATIO
 
     w := la.normalize(look_from - look_at);
@@ -122,8 +127,12 @@ create_camera::proc()->Camera{
     pixel_delta_v := viewport_v / HEIGHT
 
     // Calculate the location of the upper left pixel.
-    viewport_upper_left := center - (focal_length * w) - viewport_u/2 - viewport_v/2
+    viewport_upper_left := center - (focus_dist * w) - viewport_u/2 - viewport_v/2
     pixel00_loc := viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v)
+
+    defocus_radius := focus_dist * math.tan(la.RAD_PER_DEG*defocus_angle / 2)
+    defocus_disk_u := u * defocus_radius
+    defocus_disk_v := v * defocus_radius
 
     return Camera{
         ASPECT_RATIO,
@@ -132,6 +141,10 @@ create_camera::proc()->Camera{
         look_at,
         vup,
         vfov,
+        defocus_angle,
+        focus_dist,
+        defocus_disk_u,
+        defocus_disk_v,
         pixel_delta_u,
         pixel_delta_v,
         pixel00_loc,
@@ -289,7 +302,11 @@ get_ray::proc(i:i64,j:i64,camera:Camera)->Ray{
     ((f64(i)+offset.x)*camera.pixel_delta_u) +
     (((f64(j)+offset.y)*camera.pixel_delta_v))
 
-    ray_origin := camera.look_from
+    p := random_in_unit_disk()
+    defocus_disk_sample:= camera.look_from + (p[0] * camera.defocus_disk_u) + (p[1] * camera.defocus_disk_v);
+    ray_origin := (camera.defocus_angle <= 0) ? camera.look_from : defocus_disk_sample
+
+    //ray_origin := camera.look_from  // NO DOF
     ray_direction := pixel_sample - ray_origin
 
     return Ray{ray_origin, ray_direction}  
