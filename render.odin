@@ -1,5 +1,6 @@
 package main
 
+import "vendor:zlib"
 import "core:fmt"
 import sdl "vendor:sdl3"
 import la "core:math/linalg"
@@ -31,19 +32,76 @@ interval_clamp::proc(interval:Interval,x:f64)->f64{
     else if x<interval.min do return interval.min
     return x
 }
+expand::proc(interval:Interval,delta:f64)->Interval {
+    padding := delta/2
+    return Interval{interval.min - padding, interval.max + padding}
+}
 
 empty:Interval: Interval{math.INF_F64,math.NEG_INF_F64}
 universe:Interval: Interval{math.NEG_INF_F64,math.INF_F64}
 
-Sphere:: struct{
-    center:Point,
-    radius:f64,
-    mat:Material
+aabb::struct{
+    x:Interval,
+    y:Interval,
+    z:Interval
 }
 
+make_aabb::proc(a:Point,b:Point)->aabb{
+    box:aabb
+    box.x = (a[0] <= b[0]) ? Interval{a[0], b[0]} : Interval{b[0], a[0]}
+    box.y = (a[1] <= b[1]) ? Interval{a[1], b[1]} : Interval{b[1], a[1]}
+    box.z = (a[2] <= b[2]) ? Interval{a[2], b[2]} : Interval{b[2], a[2]}
+    return box
+}
+
+axis_interval::proc(box:aabb,n:int)->Interval{
+    if n==1 do return box.y
+    if n==2 do return box.z
+    return box.x
+}
+
+hit_aabb::proc(box:aabb,r:Ray,ray_t:Interval)->bool{
+    ray_orig := r.orig
+    ray_dir  := r.dir
+    interval := ray_t
+
+    for axis := 0; axis < 3; axis+=1 {
+        ax := axis_interval(box,axis)
+        adinv := 1.0 / ray_dir[axis];
+
+        t0 := (ax.min - ray_orig[axis]) * adinv;
+        t1 := (ax.max - ray_orig[axis]) * adinv;
+
+        if t0 < t1 {
+            if t0 > interval.min do interval.min = t0;
+            if t1 < interval.max do interval.max = t1;
+        } else {
+            if t1 > interval.min do interval.min = t1;
+            if t0 < interval.max do interval.max = t0;
+        }
+
+        if interval.max <= interval.min do return false;
+    }
+    return true;
+
+}
+
+Sphere:: struct{
+    center:Ray,
+    radius:f64,
+    mat:Material,
+}
+make_sphere_s::proc(static_center:Point,radius:f64,mat:Material)->Sphere{
+    return Sphere{Ray{static_center,Vec3{0,0,0},0},radius,mat}
+}
+make_sphere_d::proc(center1:Point,center2:Point,radius:f64,mat:Material)->Sphere{
+    return Sphere{Ray{center1,center2-center1,0},radius,mat}
+}
+make_sphere::proc{make_sphere_s,make_sphere_d}
 Ray :: struct{
     orig : Point,
-    dir : Vec3
+    dir : Vec3,
+    tm:f64
 }
 
 HitRecord :: struct{
@@ -96,9 +154,9 @@ Camera::struct{
 
 create_camera::proc()->Camera{
     //Given values
-    samples_per_pixel : i64 = 100
-    max_depth := 10
-    vfov := 30.0
+    samples_per_pixel : i64 = SAMPLES_PER_PIXEL
+    max_depth := MAX_DEPTH
+    vfov := VFOV
 
     defocus_angle := 0.6;
     focus_dist    := 10.0;
@@ -211,13 +269,13 @@ scatter::proc(r:Ray, rec:^HitRecord,attenuation:^Color,scattered:^Ray,mat:Materi
     case Lambert:
         scatter_direction := rec.normal + random_unit_vector()
         if la.length2(scatter_direction) <= 1e-24 do scatter_direction=rec.normal
-        scattered^ = Ray{rec.p,scatter_direction}
+        scattered^ = Ray{rec.p,scatter_direction,r.tm}
         attenuation^ = m.albedo
         return true
     case Metallic:
         reflected := reflect(la.normalize(r.dir), rec.normal)
         reflected = la.normalize(reflected) + (m.fuzz * random_unit_vector())
-        scattered^ = Ray{rec.p, reflected}
+        scattered^ = Ray{rec.p, reflected,r.tm}
         attenuation^ = m.color
         return la.dot(scattered.dir, rec.normal) > 0
     case Dielectric:
@@ -237,7 +295,7 @@ scatter::proc(r:Ray, rec:^HitRecord,attenuation:^Color,scattered:^Ray,mat:Materi
         if cannot_refract || reflectance>rand.float64() do direction = reflect(unit_direction, rec.normal);
         else do direction = refract(unit_direction, rec.normal, ri);
 
-        scattered^ = Ray{rec.p, direction}
+        scattered^ = Ray{rec.p, direction,r.tm}
         return true
     }
     return false
@@ -259,7 +317,8 @@ hit_all:: proc(r:Ray, ray_t:Interval,rec:^HitRecord,objects:[dynamic]Sphere)->bo
 }
 
 hit_sphere::proc(sphere:Sphere,r:Ray,ray_t:Interval,rec:^HitRecord)->bool{
-    oc := sphere.center - r.orig
+    current_center := ray_at(sphere.center,r.tm)
+    oc := current_center- r.orig
     a := la.length2(r.dir)
     h := la.dot(r.dir,oc) 
     c := la.length2(oc) -sphere.radius*sphere.radius
@@ -273,7 +332,7 @@ hit_sphere::proc(sphere:Sphere,r:Ray,ray_t:Interval,rec:^HitRecord)->bool{
     }
     rec.t= root
     rec.p = ray_at(r,rec.t)
-    outward_normal : Vec3 = (rec.p - sphere.center) / sphere.radius;
+    outward_normal : Vec3 = (rec.p - current_center) / sphere.radius;
     rec.front_face, rec.normal = set_face_normal(r,outward_normal)
     rec.mat = sphere.mat
     return true
@@ -308,8 +367,8 @@ get_ray::proc(i:i64,j:i64,camera:Camera)->Ray{
 
     //ray_origin := camera.look_from  // NO DOF
     ray_direction := pixel_sample - ray_origin
-
-    return Ray{ray_origin, ray_direction}  
+    ray_time := rand.float64()
+    return Ray{ray_origin, ray_direction,ray_time}  
 }
 
 write_color ::proc (pixel_color:Color) -> u32{

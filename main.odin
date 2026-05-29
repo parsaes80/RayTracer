@@ -12,6 +12,10 @@ Color :: [3]f64
 
 ASPECT_RATIO :f64: 16.0/9.0
 HEIGHT:: 720
+SAMPLES_PER_PIXEL::50
+MAX_DEPTH :: 10
+VFOV:: 30.0
+
 WIDTH:: HEIGHT* 16/9
 
 Framebuffer : [HEIGHT][WIDTH] u32 
@@ -34,7 +38,7 @@ main :: proc(){
     objects:[dynamic]Sphere
 
     ground_material : Material = Lambert{Color{0.5, 0.5, 0.5}}
-    append(&objects, Sphere{Point{0.0, -1000.0, 0.0}, 1000.0, ground_material})
+    append(&objects, make_sphere(Point{0.0, -1000.0, 0.0}, 1000.0, ground_material))
 
     for a := -11; a < 11; a += 1 {
         for b := -11; b < 11; b += 1 {
@@ -44,13 +48,14 @@ main :: proc(){
             if la.length(center - Point{4.0, 0.2, 0.0}) > 0.9 {
                 if choose_mat < 0.8 {
                     albedo := random_vector(0.0, 1.0) * random_vector(0.0, 1.0)
-                    append(&objects, Sphere{center, 0.2, Lambert{albedo}})
+                    center2 := center + Vec3{0,rand.float64_range(0,0.5),0}
+                    append(&objects, make_sphere(center,center2, 0.2, Lambert{albedo}))
                 } else if choose_mat < 0.95 {
                     albedo := random_vector(0.5, 1.0)
                     fuzz := rand.float64_range(0.0, 0.5)
-                    append(&objects, Sphere{center, 0.2, Metallic{albedo, fuzz}})
+                    append(&objects, make_sphere(center, 0.2, Metallic{albedo, fuzz}))
                 } else {
-                    append(&objects, Sphere{center, 0.2, Dielectric{1.5}})
+                    append(&objects, make_sphere(center, 0.2, Dielectric{1.5}))
                 }
             }
         }
@@ -60,9 +65,9 @@ main :: proc(){
     material2 : Material = Lambert{Color{0.4, 0.2, 0.1}}
     material3 : Material = Metallic{Color{0.7, 0.6, 0.5}, 0.0}
     append(&objects,
-        Sphere{Point{0.0, 1.0, 0.0}, 1.0, material1},
-        Sphere{Point{-4.0, 1.0, 0.0}, 1.0, material2},
-        Sphere{Point{4.0, 1.0, 0.0}, 1.0, material3},
+        make_sphere(Point{0.0, 1.0, 0.0}, 1.0, material1),
+        make_sphere(Point{-4.0, 1.0, 0.0}, 1.0, material2),
+        make_sphere(Point{4.0, 1.0, 0.0}, 1.0, material3),
     )
 
     render_parallel(camera,objects)
