@@ -12,7 +12,7 @@ Color :: [3]f64
 
 ASPECT_RATIO :f64: 16.0/9.0
 HEIGHT:: 720
-SAMPLES_PER_PIXEL::50
+SAMPLES_PER_PIXEL::10
 MAX_DEPTH :: 10
 VFOV:: 30.0
 
@@ -35,10 +35,10 @@ main :: proc(){
 
     camera := create_camera()
 
-    objects:[dynamic]Sphere
+    world:World
 
     ground_material : Material = Lambert{Color{0.5, 0.5, 0.5}}
-    append(&objects, make_sphere(Point{0.0, -1000.0, 0.0}, 1000.0, ground_material))
+    append(&world.objects, make_sphere(Point{0.0, -1000.0, 0.0}, 1000.0, ground_material))
 
     for a := -11; a < 11; a += 1 {
         for b := -11; b < 11; b += 1 {
@@ -49,13 +49,13 @@ main :: proc(){
                 if choose_mat < 0.8 {
                     albedo := random_vector(0.0, 1.0) * random_vector(0.0, 1.0)
                     center2 := center + Vec3{0,rand.float64_range(0,0.5),0}
-                    append(&objects, make_sphere(center,center2, 0.2, Lambert{albedo}))
+                    append(&world.objects, make_sphere(center,center2, 0.2, Lambert{albedo}))
                 } else if choose_mat < 0.95 {
                     albedo := random_vector(0.5, 1.0)
                     fuzz := rand.float64_range(0.0, 0.5)
-                    append(&objects, make_sphere(center, 0.2, Metallic{albedo, fuzz}))
+                    append(&world.objects, make_sphere(center, 0.2, Metallic{albedo, fuzz}))
                 } else {
-                    append(&objects, make_sphere(center, 0.2, Dielectric{1.5}))
+                    append(&world.objects, make_sphere(center, 0.2, Dielectric{1.5}))
                 }
             }
         }
@@ -64,13 +64,14 @@ main :: proc(){
     material1 : Material = Dielectric{1.5}
     material2 : Material = Lambert{Color{0.4, 0.2, 0.1}}
     material3 : Material = Metallic{Color{0.7, 0.6, 0.5}, 0.0}
-    append(&objects,
+    
+    append(&world.objects,
         make_sphere(Point{0.0, 1.0, 0.0}, 1.0, material1),
         make_sphere(Point{-4.0, 1.0, 0.0}, 1.0, material2),
         make_sphere(Point{4.0, 1.0, 0.0}, 1.0, material3),
     )
 
-    render_parallel(camera,objects)
+    render_parallel(camera,world)
 
     event: sdl.Event
     for running {
