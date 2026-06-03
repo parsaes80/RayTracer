@@ -10,7 +10,7 @@ Interval::struct{
     max:f64
 }
 
-interval_size::proc(interval:Interval,x:f64)->f64{
+interval_size::proc(interval:Interval)->f64{
     return interval.max - interval.min
 }
 
@@ -40,11 +40,12 @@ make_interval::proc(a:Interval,b:Interval)->Interval{
     return res
 }
 
-axis_interval::proc(box:aabb,n:int)->Interval{
+axis_interval:: #force_inline proc(box:aabb,n:int)->Interval {
     if n==1 do return box.y
     if n==2 do return box.z
     return box.x
 }
+
 empty:Interval: Interval{math.INF_F64,math.NEG_INF_F64}
 universe:Interval: Interval{math.NEG_INF_F64,math.INF_F64}
 
@@ -53,6 +54,8 @@ aabb::struct{
     y:Interval,
     z:Interval
 }
+emptyAABB:aabb: aabb{empty,empty,empty}
+universeAABB:aabb: aabb{universe, universe, universe}
 
 make_aabb_point::proc(a:Point,b:Point)->aabb{
     box:aabb
@@ -164,7 +167,9 @@ make_BVH_Node::proc(objects:[dynamic]Hittable)->Hittable{
 }
 make_BVH_node::proc(objects:[dynamic]Hittable,start:int,end:int)->Hittable{
     assert(end > start)
-    axis := rand.int_range(0,3)
+    bbox:= emptyAABB
+    for object_idx := start;object_idx<end;object_idx += 1 do bbox = make_aabb(bbox,objects[object_idx].bbox) 
+    axis := longest_axis(bbox)
     comparator := (axis == 0) ? box_x_compare : (axis == 1) ? box_y_compare: box_z_compare
     node:Hittable
     node.type = .BVH
@@ -194,7 +199,10 @@ make_BVH_node::proc(objects:[dynamic]Hittable,start:int,end:int)->Hittable{
     node.bbox = make_aabb(node.left.bbox,node.right.bbox)
     return node
 }
-
+longest_axis::proc(bbox:aabb)->int{
+    if interval_size(bbox.x) > interval_size(bbox.y) do return interval_size(bbox.x) > interval_size(bbox.z) ? 0 : 2
+    else do return interval_size(bbox.y) > interval_size(bbox.z) ? 1 : 2
+}
 box_compare::proc(a:Hittable,b:Hittable,axis_index:int)->int{
     a_axis_interval := axis_interval(a.bbox,axis_index)
     b_axis_interval := axis_interval(b.bbox,axis_index)

@@ -75,7 +75,7 @@ render_parallel::proc(){
 
     camera := global.camera
     world := global.world
-
+    
     y := 0
     for i := 0; i < thread_count; i += 1 {
         extra := 0

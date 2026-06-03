@@ -77,6 +77,7 @@ main :: proc(){
         make_sphere(Point{4.0, 1.0, 0.0}, 1.0, material3),
     )
     
+    
     raw_objects := global.world.objects
     bvh_root := make_BVH_Node(raw_objects)
     bvh: [dynamic]Hittable
@@ -99,7 +100,7 @@ main :: proc(){
         sdl.RenderPresent(renderer)
         sdl.Delay(16)
     }
-
+    
     sdl.Quit()
 }
 
