@@ -12,7 +12,7 @@ Color :: [3]f64
 
 ASPECT_RATIO :f64: 16.0/9.0
 HEIGHT:: 720
-SAMPLES_PER_PIXEL::10
+SAMPLES_PER_PIXEL::400
 MAX_DEPTH :: 10
 VFOV:: 30.0
 
@@ -70,6 +70,12 @@ main :: proc(){
         make_sphere(Point{-4.0, 1.0, 0.0}, 1.0, material2),
         make_sphere(Point{4.0, 1.0, 0.0}, 1.0, material3),
     )
+    
+    raw_objects := world.objects
+    bvh_root := make_BVH_Node(raw_objects)
+    bvh: [dynamic]Hittable
+    append(&bvh, bvh_root)
+    world.objects = bvh
 
     render_parallel(camera,world)
 

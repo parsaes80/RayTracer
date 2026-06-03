@@ -2,6 +2,8 @@ package main
 
 import la "core:math/linalg"
 import math "core:math"
+import rand "core:math/rand"
+import sort "core:sort"
 
 Interval::struct{
     min:f64,
@@ -38,6 +40,11 @@ make_interval::proc(a:Interval,b:Interval)->Interval{
     return res
 }
 
+axis_interval::proc(box:aabb,n:int)->Interval{
+    if n==1 do return box.y
+    if n==2 do return box.z
+    return box.x
+}
 empty:Interval: Interval{math.INF_F64,math.NEG_INF_F64}
 universe:Interval: Interval{math.NEG_INF_F64,math.INF_F64}
 
@@ -64,12 +71,6 @@ make_aabb_box::proc(box0:aabb,box1:aabb)->aabb{
 }
 
 make_aabb::proc{make_aabb_point,make_aabb_box}
-
-axis_interval::proc(box:aabb,n:int)->Interval{
-    if n==1 do return box.y
-    if n==2 do return box.z
-    return box.x
-}
 
 hit_aabb::proc(box:aabb,r:Ray,ray_t:Interval)->bool{
     ray_orig := r.orig
@@ -120,25 +121,30 @@ ray_at::proc(ray:Ray,t:f64)-> Vec3{
     return ray.orig+t*ray.dir
 }
 
-Sphere:: struct{
+HittableType::enum{Sphere,Quad,BVH}
+
+Hittable:: struct{
     center:Ray,
     radius:f64,
     mat:Material,
-    bbox:aabb
+    bbox:aabb,
+    left:^Hittable,
+    right:^Hittable,
+    type:HittableType
 }
 
-make_sphere_s::proc(static_center:Point,radius:f64,mat:Material)->Sphere{
+make_sphere_s::proc(static_center:Point,radius:f64,mat:Material)->Hittable{
     rvec := Vec3{radius, radius, radius}
     bbox := make_aabb(static_center - rvec, static_center + rvec)
-    return Sphere{Ray{static_center,Vec3{0,0,0},0},radius,mat,bbox}
+    return Hittable{Ray{static_center,Vec3{0,0,0},0},radius,mat,bbox,nil,nil,.Sphere}
 }
 
-make_sphere_d::proc(center1:Point,center2:Point,radius:f64,mat:Material)->Sphere{
+make_sphere_d::proc(center1:Point,center2:Point,radius:f64,mat:Material)->Hittable{
     rvec := Vec3{radius, radius, radius}
     center := Ray{center1,center2-center1,0}
     box1 := make_aabb(ray_at(center,0) - rvec, ray_at(center,0) + rvec)
     box2 := make_aabb(ray_at(center,1) - rvec, ray_at(center,1) + rvec)
-    return Sphere{center,radius,mat,make_aabb(box1,box2)}
+    return Hittable{center,radius,mat,make_aabb(box1,box2),nil,nil,.Sphere}
 }
 
 make_sphere::proc{make_sphere_s,make_sphere_d}
@@ -150,16 +156,57 @@ World::struct{
 
 world_add::proc(world:^World,obj:Hittable){
     append(&world.objects,obj)
-    world.bbox = obj.(Sphere).bbox
+    world.bbox = make_aabb(world.bbox,obj.bbox) 
+}
+make_BVH_Node::proc(objects:[dynamic]Hittable)->Hittable{
+    assert(len(objects) > 0)
+    return make_BVH_node(objects,0,len(objects))
+}
+make_BVH_node::proc(objects:[dynamic]Hittable,start:int,end:int)->Hittable{
+    assert(end > start)
+    axis := rand.int_range(0,3)
+    comparator := (axis == 0) ? box_x_compare : (axis == 1) ? box_y_compare: box_z_compare
+    node:Hittable
+    node.type = .BVH
+    object_span := end - start 
+    if object_span ==1{
+        node.left = &objects[start]
+        node.right = &objects[start]
+    }
+    else if object_span == 2 {
+        left_ptr := &objects[start]
+        right_ptr := &objects[start+1]
+        if comparator(objects[start], objects[start+1]) > 0 {
+            left_ptr = &objects[start+1]
+            right_ptr = &objects[start]
+        }
+        node.left = left_ptr
+        node.right = right_ptr
+    }
+    else{
+        sort.quick_sort_proc(objects[start:end],comparator)
+        mid := start + object_span/2
+        node.left = new(Hittable)
+        node.left^ = make_BVH_node(objects,start,mid)
+        node.right = new(Hittable)
+        node.right^ = make_BVH_node(objects,mid,end)
+    }
+    node.bbox = make_aabb(node.left.bbox,node.right.bbox)
+    return node
 }
 
-Hittable::union{Sphere}
-
-BVH_node::struct{
-    left:^Hittable,
-    right:^Hittable,
-    bbox:aabb
+box_compare::proc(a:Hittable,b:Hittable,axis_index:int)->int{
+    a_axis_interval := axis_interval(a.bbox,axis_index)
+    b_axis_interval := axis_interval(b.bbox,axis_index)
+    if a_axis_interval.min < b_axis_interval.min do return -1
+    if a_axis_interval.min > b_axis_interval.min do return 1
+    return 0
 }
+
+box_x_compare::proc(a:Hittable,b:Hittable)->int {return box_compare(a, b, 0)}
+box_y_compare::proc(a:Hittable,b:Hittable)->int {return box_compare(a, b, 1)}
+box_z_compare::proc(a:Hittable,b:Hittable)->int {return box_compare(a, b, 2)}
+
 
 hit_all:: proc(r:Ray, ray_t:Interval,rec:^HitRecord,objects:[dynamic]Hittable)->bool{
     temp_rec : HitRecord
@@ -176,30 +223,51 @@ hit_all:: proc(r:Ray, ray_t:Interval,rec:^HitRecord,objects:[dynamic]Hittable)->
     return hit_anything;
 }
 
-hit_sphere::proc(obj:Hittable,r:Ray,ray_t:Interval,rec:^HitRecord)->bool{
-    switch sphere in obj{
-        case Sphere:
-            current_center := ray_at(sphere.center,r.tm)
-            oc := current_center- r.orig
-            a := la.length2(r.dir)
-            h := la.dot(r.dir,oc)
-            c := la.length2(oc) -sphere.radius*sphere.radius
-            discriminant := h*h - a*c
-            if discriminant < 0 do return false
-            sqrtd := math.sqrt(discriminant)
-            root := (h - sqrtd) / a
-            if !interval_surrounds(ray_t,root){
-                root = (h + sqrtd) / a;
-                if !interval_surrounds(ray_t,root) do return false
-            }
-            rec.t= root
-            rec.p = ray_at(r,rec.t)
-            outward_normal : Vec3 = (rec.p - current_center) / sphere.radius;
-            rec.front_face, rec.normal = set_face_normal(r,outward_normal)
-            rec.mat = sphere.mat
-            return true
+hit_hittable::proc(obj:Hittable,r:Ray,ray_t:Interval,rec:^HitRecord)->bool{
+    if obj.type == .BVH {
+        if !hit_aabb(obj.bbox,r,ray_t) do return false
+        if obj.left == nil || obj.right == nil do return false
+
+        temp_rec : HitRecord
+        hit_anything := false
+        closest_so_far := ray_t.max
+
+        if hit(obj.left^, r, Interval{ray_t.min,closest_so_far}, &temp_rec) {
+            hit_anything = true
+            closest_so_far = temp_rec.t
+            rec^ = temp_rec
+        }
+
+        if hit(obj.right^, r, Interval{ray_t.min,closest_so_far}, &temp_rec) {
+            hit_anything = true
+            rec^ = temp_rec
+        }
+
+        return hit_anything
     }
-    return true
+
+    if obj.type == .Sphere{
+        current_center := ray_at(obj.center,r.tm)
+        oc := current_center- r.orig
+        a := la.length2(r.dir)
+        h := la.dot(r.dir,oc)
+        c := la.length2(oc) -obj.radius*obj.radius
+        discriminant := h*h - a*c
+        if discriminant < 0 do return false
+        sqrtd := math.sqrt(discriminant)
+        root := (h - sqrtd) / a
+        if !interval_surrounds(ray_t,root){
+            root = (h + sqrtd) / a;
+            if !interval_surrounds(ray_t,root) do return false
+        }
+        rec.t= root
+        rec.p = ray_at(r,rec.t)
+        outward_normal : Vec3 = (rec.p - current_center) / obj.radius;
+        rec.front_face, rec.normal = set_face_normal(r,outward_normal)
+        rec.mat = obj.mat
+        return true
+    }
+    return false
 }
 
-hit::proc{hit_aabb,hit_sphere}
+hit::proc{hit_aabb,hit_hittable}
