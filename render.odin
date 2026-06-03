@@ -65,14 +65,16 @@ render_worker :: proc(data: rawptr) {
     render(job^.start, job^.end, job^.camera, job^.objects)
 }
 
-render_parallel::proc(camera:Camera,world:World){
-
+render_parallel::proc(){
     thread_count := 16
 
     rows_per_thread := int(WIDTH) / thread_count
     remainder := int(WIDTH) % thread_count
     threads: [dynamic]^thread.Thread
     jobs: [16]RenderJob
+
+    camera := global.camera
+    world := global.world
 
     y := 0
     for i := 0; i < thread_count; i += 1 {
