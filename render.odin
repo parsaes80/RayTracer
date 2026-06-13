@@ -5,6 +5,7 @@ import math "core:math"
 import rand "core:math/rand"
 import runtime "base:runtime"
 import "core:thread"
+import "core:os"
 
 ray_color::proc(r:Ray,depth:int,objects:[dynamic]Hittable)->Color{
     if depth <= 0 do return Color{0,0,0}
@@ -66,7 +67,7 @@ render_worker :: proc(data: rawptr) {
 }
 
 render_parallel::proc(){
-    thread_count := 16
+    thread_count := os.get_processor_core_count()
 
     rows_per_thread := int(WIDTH) / thread_count
     remainder := int(WIDTH) % thread_count

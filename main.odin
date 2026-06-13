@@ -3,7 +3,6 @@ package main
 import "core:fmt"
 import sdl "vendor:sdl3"
 import la "core:math/linalg"
-import math "core:math"
 import rand "core:math/rand"
 import "core:thread"
 
@@ -13,7 +12,7 @@ Color :: [3]f64
 
 ASPECT_RATIO :f64: 16.0/9.0
 HEIGHT:: 720
-SAMPLES_PER_PIXEL::100
+SAMPLES_PER_PIXEL::200
 MAX_DEPTH :: 10
 VFOV:: 30.0
 
